@@ -1,4 +1,3 @@
---Lưu ý chung: với Bigquery thì mình có thể groupby, orderby 1,2,3(1,2,3() ở đây là thứ tự của column mà mình select nhé
 
 --Cau 1:
 SELECT 
@@ -9,7 +8,6 @@ SELECT
 FROM `bigquery-public-data.google_analytics_sample.ga_sessions_2017*`
 WHERE _table_suffix BETWEEN '0101' AND '0331'
 GROUP BY month_extract;
---correct
 
 -- Cau 2:
 SELECT 
@@ -19,8 +17,6 @@ SELECT
     SUM(totals.bounces)/SUM(totals.visits)*100.0 AS bounce_rate -- no round required
 FROM `bigquery-public-data.google_analytics_sample.ga_sessions_201707*` -- in July 2017
 GROUP BY page_source;
---correct
-
 
 -- Cau 3: 
 WITH month_range AS
@@ -54,7 +50,6 @@ FROM month_range
 UNION ALL
 SELECT *
 FROM week_range;
---correct
 
 -- Cau 4: 
 WITH id_status AS
@@ -78,7 +73,7 @@ WITH id_status AS
         ,COUNT(DISTINCT id) AS purchaser
         ,SUM(pageviews) AS p_pageviews
     FROM id_status
-    WHERE transactions is not null -- transactions instead of revenue??? maybe transaction included null revenue...
+    WHERE transactions is not null 
     GROUP BY month
 )
     , non_p_num AS
@@ -99,7 +94,6 @@ FROM p_num
 JOIN non_p_num
 USING (month)
 ORDER BY month;
---phần này T đã giải thích chỗ transaction/productRevenue rồi
 
 with purchaser_data as(
   select
@@ -134,13 +128,6 @@ select
 from purchaser_data pd
 left join non_purchaser_data using(month)
 order by pd.month;
-
-
---câu 4 này lưu ý là mình nên dùng left join hoặc full join, bởi vì trong câu này, phạm vi chỉ từ tháng 6-7, nên chắc chắc sẽ có pur và nonpur của cả 2 tháng
---mình inner join thì vô tình nó sẽ ra đúng. nhưng nếu đề bài là 1 khoảng thời gian dài hơn, 2-3 năm chẳng hạn, nó cũng tháng chỉ có nonpur mà k có pur
---thì khi đó inner join nó sẽ làm mình bị mất data, thay vì hiện số của nonpur và pur thì nó để trống
-
-
 
 --Cau 5:
 WITH id_status AS
@@ -182,26 +169,8 @@ and totals.totalTransactionRevenue is not null
 and product.productRevenue is not null
 group by month;
 
--- Cau 6: KHONG GIONG OUTPUT
-WITH info AS
-(
-    SELECT
-        FORMAT_DATE("%Y%m",PARSE_DATE("%Y%m%d",date)) AS month
-        ,totals.visits AS visit
-        ,product.productRevenue AS revenue
-    FROM `bigquery-public-data.google_analytics_sample.ga_sessions_201707*`   
-        ,UNNEST (hits) AS hits
-        ,UNNEST (hits.product) AS product
-    WHERE totals.transactions is not null 
-        AND product.productRevenue is not null 
-)
-SELECT 
-    month
-    ,(SUM(revenue) / SUM(visit)) / 1000000 AS avg_revenue_by_user_per_visit 
-FROM info
-GROUP BY month;
+-- Cau 6:
 
---ghi ngắn gọi lại ntn
 select
     format_date("%Y%m",parse_date("%Y%m%d",date)) as month,
     ((sum(product.productRevenue)/sum(totals.visits))/power(10,6)) as avg_revenue_by_user_per_visit
@@ -213,45 +182,6 @@ group by month;
 
 
 -- Cau 7:
-
-WITH youtubemen_buyer_id AS
-(
-    SELECT
-        fullVisitorId AS id
-        ,product.v2ProductName AS product
-        ,SUM(product.productRevenue) AS revenue
-    FROM `bigquery-public-data.google_analytics_sample.ga_sessions_201707*`   
-        ,UNNEST (hits) AS hits
-        ,UNNEST (hits.product) AS product
-    WHERE product.productRevenue is not null
-        AND product.v2ProductName = "YouTube Men's Vintage Henley"
-    GROUP BY id, product
-)
-    , youtubemen_excluded_products AS
-(
-    SELECT
-        fullVisitorId AS id
-        ,product.v2ProductName AS product
-        ,SUM(product.productQuantity) AS quantity
-        ,SUM(product.productRevenue) AS revenue
-    FROM `bigquery-public-data.google_analytics_sample.ga_sessions_201707*`   
-        ,UNNEST (hits) AS hits
-        ,UNNEST (hits.product) AS product
-    WHERE product.productRevenue is not null
-        AND product.v2ProductName <> "YouTube Men's Vintage Henley"
-    GROUP BY id, product
-)
-SELECT
-   youtubemen_excluded_products.product AS other_purchased_products
-   ,quantity
-FROM youtubemen_buyer_id
-LEFT JOIN youtubemen_excluded_products
-USING (id)
-ORDER BY quantity DESC;
-
---mình có thể dùng left join hoặc subquery theo 2 cách dưới đây
-
---subquery:
 select
     product.v2productname as other_purchased_product,
     sum(product.productQuantity) as quantity
@@ -269,146 +199,7 @@ and product.productRevenue is not null
 group by other_purchased_product
 order by quantity desc;
 
---CTE:
-
-with buyer_list as(
-    SELECT
-        distinct fullVisitorId
-    FROM `bigquery-public-data.google_analytics_sample.ga_sessions_201707*`
-    , UNNEST(hits) AS hits
-    , UNNEST(hits.product) as product
-    WHERE product.v2ProductName = "YouTube Men's Vintage Henley"
-    AND totals.transactions>=1
-    AND product.productRevenue is not null
-)
-
-SELECT
-  product.v2ProductName AS other_purchased_products,
-  SUM(product.productQuantity) AS quantity
-FROM `bigquery-public-data.google_analytics_sample.ga_sessions_201707*`
-, UNNEST(hits) AS hits
-, UNNEST(hits.product) as product
-JOIN buyer_list using(fullVisitorId)
-WHERE product.v2ProductName != "YouTube Men's Vintage Henley"
- and product.productRevenue is not null
-GROUP BY other_purchased_products
-ORDER BY quantity DESC;
-
-
 -- Cau 8:
-WITH addtocart AS
-(
-        SELECT
-        FORMAT_DATE("%Y%m",PARSE_DATE("%Y%m%d",date)) AS month
-        ,COUNT(eCommerceAction.action_type) AS num_addtocart
-        FROM `bigquery-public-data.google_analytics_sample.ga_sessions_2017*`   
-                ,UNNEST (hits) AS hits
-        WHERE _table_suffix BETWEEN '0101' AND '0331'
-                AND eCommerceAction.action_type = '3'
-        GROUP BY month 
-)
-    , productview AS
-(
-        SELECT
-        FORMAT_DATE("%Y%m",PARSE_DATE("%Y%m%d",date)) AS month
-        ,COUNT(eCommerceAction.action_type) AS num_product_view
-        FROM `bigquery-public-data.google_analytics_sample.ga_sessions_2017*`   
-                ,UNNEST (hits) AS hits
-        WHERE _table_suffix BETWEEN '0101' AND '0331'
-                AND eCommerceAction.action_type = '2'
-        GROUP BY month 
-)
-    , id_purchase_revenue AS -- this is the first step to inspect the purchase step
-(
-                SELECT
-        FORMAT_DATE("%Y%m",PARSE_DATE("%Y%m%d",date)) AS month
-        ,fullVisitorId
-        ,eCommerceAction.action_type
-        ,product.productRevenue -- notice that not every purchase step that an ID made that the revenue was recorded (maybe refund?).
-        FROM `bigquery-public-data.google_analytics_sample.ga_sessions_2017*`   
-                ,UNNEST (hits) AS hits
-                ,UNNEST (hits.product) AS product -- productrevenue 
-        WHERE _table_suffix BETWEEN '0101' AND '0331'
-                AND eCommerceAction.action_type = '6'
-)
-    , purchase AS   
-(
-        SELECT 
-            month
-            ,COUNT(action_type) AS num_purchase  
-        FROM id_purchase_revenue 
-        WHERE productRevenue IS NOT NULL
-        GROUP BY month
-)
-SELECT 
-        month
-        ,num_product_view
-        ,num_addtocart
-        ,num_purchase
-        ,ROUND(num_addtocart / num_product_view * 100.0, 2) AS add_to_cart_rate
-        ,ROUND(num_purchase / num_product_view * 100.0, 2) AS purchase_rate
-FROM productview
-JOIN addtocart
-USING (month)
-JOIN purchase
-USING (month)
-ORDER BY month;
-
-
---bài này count theo action type là sai. vì đề bài yêu cầu mình số lượng sản phẩm. vd như 1 lần purchase, có thể sẽ có nhiều sản phẩm trong đó, nên mình count theo lượt purchase sẽ k phản ảnh đúng được số lượng sp đc purchased
-
---dùng CTE
-with
-product_view as(
-SELECT
-  format_date("%Y%m", parse_date("%Y%m%d", date)) as month,
-  count(product.productSKU) as num_product_view
-FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`
-, UNNEST(hits) AS hits
-, UNNEST(hits.product) as product
-WHERE _TABLE_SUFFIX BETWEEN '20170101' AND '20170331'
-AND hits.eCommerceAction.action_type = '2'
-GROUP BY 1
-),
-
-add_to_cart as(
-SELECT
-  format_date("%Y%m", parse_date("%Y%m%d", date)) as month,
-  count(product.productSKU) as num_addtocart
-FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`
-, UNNEST(hits) AS hits
-, UNNEST(hits.product) as product
-WHERE _TABLE_SUFFIX BETWEEN '20170101' AND '20170331'
-AND hits.eCommerceAction.action_type = '3'
-GROUP BY 1
-),
-
-purchase as(
-SELECT
-  format_date("%Y%m", parse_date("%Y%m%d", date)) as month,
-  count(product.productSKU) as num_purchase
-FROM `bigquery-public-data.google_analytics_sample.ga_sessions_*`
-, UNNEST(hits) AS hits
-, UNNEST(hits.product) as product
-WHERE _TABLE_SUFFIX BETWEEN '20170101' AND '20170331'
-AND hits.eCommerceAction.action_type = '6'
-and product.productRevenue is not null   --phải thêm điều kiện này để đảm bảo có revenue
-group by 1
-)
-
-select
-    pv.*,
-    num_addtocart,
-    num_purchase,
-    round(num_addtocart*100/num_product_view,2) as add_to_cart_rate,
-    round(num_purchase*100/num_product_view,2) as purchase_rate
-from product_view pv
-join add_to_cart a on pv.month = a.month
-join purchase p on pv.month = p.month
-order by pv.month;
-
-
---Cách 2: bài này mình có thể dùng count(case when) hoặc sum(case when)
 
 with product_data as(
 select
@@ -430,6 +221,3 @@ select
     round(num_add_to_cart/num_product_view * 100, 2) as add_to_cart_rate,
     round(num_purchase/num_product_view * 100, 2) as purchase_rate
 from product_data;
-
-
-                                                                    ----good----
